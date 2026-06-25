@@ -1,0 +1,6 @@
+{
+  "name": "Claudio FM",
+  "description": "Retro late-night AI Radio DJ and digital player terminal. Enjoy custom streaming beats and chat directly with your virtual DJ, Claudio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,268 @@
+@import url('./fonts/google-fonts.css');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Share Tech Mono', ui-monospace, SFMono-Regular, monospace;
+  --font-digital: 'VT323', monospace;
+  --font-hand: 'Patrick Hand', 'Caveat', ui-rounded, 'Comic Sans MS', cursive;
+}
+
+/* ---- Hand-drawn (sketch) light theme ----
+   Scoped to .theme-sketch so dark mode is untouched. Body + mono labels switch to a
+   handwriting face; the VT323 LED clock (.font-digital) is intentionally left alone. */
+.theme-sketch {
+  font-family: 'Caveat', 'Patrick Hand', ui-rounded, cursive;
+  font-weight: 600;
+}
+.theme-sketch .font-sans {
+  font-family: 'Caveat', 'Patrick Hand', cursive;
+  font-weight: 600;
+}
+/* Keep the tiny functional/mono labels on the more print-legible hand face. */
+.theme-sketch .font-mono {
+  font-family: 'Patrick Hand', 'Caveat', cursive;
+  letter-spacing: 0.02em;
+}
+/* Big display type (clock / wordmark / titles): round, upright hand print (no slant) + a looser
+   hand-drawn wobble. */
+.theme-sketch .font-digital {
+  font-family: 'Patrick Hand', ui-rounded, cursive;
+  font-weight: 400;
+  filter: url(#rough-sketch-strong);
+}
+/* Handwriting reads a touch smaller — nudge a few of the tiniest mono labels up. */
+.theme-sketch .text-\[9px\],
+.theme-sketch .text-\[10px\] {
+  font-size: 11px;
+}
+/* Every form control drops its crisp 1px border in sketch mode — the rough.js stroke
+   injected by the global decorator replaces it (range sliders keep their own styling). */
+.theme-sketch button,
+.theme-sketch input:not([type='range']),
+.theme-sketch textarea {
+  border-color: transparent !important;
+}
+/* Wobble the clean lucide vector icons so the glyphs themselves look hand-drawn, not just
+   the rough.js box around their buttons. Scoped to .lucide so the injected sketch SVGs are
+   left alone. The native slider track is flattened so the rough.js track line reads cleanly. */
+.theme-sketch svg.lucide {
+  filter: url(#rough-sketch);
+}
+.theme-sketch input[type='range'] {
+  background: transparent !important;
+}
+/* wired-elements stay invisible (:host { opacity: 0 }) until their own JS adds a `.wired-rendered`
+   class that flips opacity to 1. React owns these elements' className and rewrites it whenever a
+   prop-driven class changes (e.g. the send button enabling once you type, the heart toggling
+   favorite) — that rewrite wipes `.wired-rendered`, and since a React class change doesn't trigger
+   Lit's re-render the element never re-adds it, so it vanishes. Force them visible; the !important
+   author rule overrides the shadow-DOM :host opacity gate. */
+.theme-sketch wired-button,
+.theme-sketch wired-icon-button,
+.theme-sketch wired-input,
+.theme-sketch wired-textarea,
+.theme-sketch wired-slider {
+  opacity: 1 !important;
+}
+/* Opt-in markers consumed by the global decorator: hide the crisp border/divider it replaces. */
+.theme-sketch [data-sketch-line],
+.theme-sketch [data-sketch-box] {
+  border-color: transparent !important;
+}
+/* Thin solid decorations (separators) get the wobble filter directly. */
+.theme-sketch [data-rough-wobble] {
+  filter: url(#rough-sketch);
+}
+
+/* Lock the app to the viewport so only inner regions scroll */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* ---- Theme switch crossfade (View Transitions API) ----
+   switchTheme() in App.tsx wraps the dark/light toggle in document.startViewTransition, so the
+   browser snapshots the whole window before & after and crossfades between them as ONE motion —
+   no more "root background eases while every child snaps" 割裂感. We just tune the timing here;
+   the default cross-fade is a plain opacity blend of the two full-screen snapshots, which is
+   exactly what we want. The live DOM keeps animating underneath (audio glow etc.) — fine, it's
+   hidden behind the snapshot for the duration. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.42s;
+  animation-timing-function: ease-in-out;
+}
+/* Stop the audio-glow / cursor blink keyframes from running on the captured snapshots, which would
+   otherwise jitter during the fade. */
+::view-transition-group(root) {
+  animation-timing-function: ease-in-out;
+}
+
+/* Custom glow rules and background grids built cleanly in Tailwind 4 */
+@keyframes glow-pulse {
+  0%,
+  100% {
+    text-shadow: 0 0 4px rgba(139, 92, 246, 0.4);
+  }
+  50% {
+    text-shadow:
+      0 0 12px rgba(139, 92, 246, 0.8),
+      0 0 20px rgba(139, 92, 246, 0.4);
+  }
+}
+
+/* --- #claudio-terminal dark-mode glow ---------------------------------------------------
+   The light reads as coming from *inside* the panel and bleeding outward. Every layer's
+   strength is scaled by the shared --glow-pulse variable (consumed via the rgb(... / calc())
+   alpha syntax), so one number drives the whole panel at once.
+
+   By default --glow-pulse holds a steady resting value — NO idle flicker. While music plays,
+   the Web Audio analyser in App.tsx writes --glow-pulse on :root every frame from the live
+   amplitude, so the panel pulses to the beat; when the music stops it eases back to rest. */
+:root {
+  --glow-pulse: 0.5;
+}
+
+/* Registered so JS writes animate smoothly and the value is type-checked as a number. */
+@property --glow-pulse {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0.5;
+}
+
+/* Outer aura — light escaping the frame. Small + soft on purpose (不要太多光晕). The depth
+   drop-shadow stays constant; only the violet bleed scales with --glow-pulse. */
+.claudio-ambient-glow {
+  box-shadow:
+    0 12px 60px rgba(7, 5, 15, 0.7),
+    0 0 44px -6px rgb(139 92 246 / calc(0.6 * var(--glow-pulse))),
+    0 0 80px -14px rgb(139 92 246 / calc(0.38 * var(--glow-pulse)));
+}
+
+/* Inner bloom — pointer-events-none overlay above the content. A faint violet glow anchored
+   in the corners that fades naturally toward the center, so the panel reads as lit from within
+   without washing out the middle. Center stays clear → clock / player / queue stay legible.
+   Reads the inherited --glow-pulse (driven by the music), so it pulses in lockstep with the
+   outer aura. */
+.claudio-inner-bloom {
+  overflow: hidden;
+  background:
+    radial-gradient(
+      50% 42% at 0% 0%,
+      rgb(139 92 246 / calc(0.16 * var(--glow-pulse))),
+      transparent 72%
+    ),
+    radial-gradient(
+      48% 40% at 100% 0%,
+      rgb(139 92 246 / calc(0.15 * var(--glow-pulse))),
+      transparent 72%
+    ),
+    radial-gradient(
+      52% 44% at 100% 100%,
+      rgb(139 92 246 / calc(0.15 * var(--glow-pulse))),
+      transparent 74%
+    ),
+    radial-gradient(
+      50% 42% at 0% 100%,
+      rgb(139 92 246 / calc(0.14 * var(--glow-pulse))),
+      transparent 74%
+    );
+  /* A thin violet rim light hugging the inner edge — a soft inset glow + a faint crisp liner,
+     both scaled by --glow-pulse so the inner edge breathes with the rest. */
+  box-shadow:
+    inset 0 0 22px -6px rgb(139 92 246 / calc(0.4 * var(--glow-pulse))),
+    inset 0 0 1px 0 rgb(167 139 250 / calc(0.45 * var(--glow-pulse)));
+}
+
+/* Respect users who ask the OS to minimize motion — pin a calm steady glow and ignore the
+   audio-driven pulsing (this local --glow-pulse overrides the value JS writes on :root). */
+@media (prefers-reduced-motion: reduce) {
+  .claudio-ambient-glow,
+  .claudio-inner-bloom {
+    --glow-pulse: 0.55;
+  }
+}
+
+/* --- #media-controller-box light sources ----------------------------------------------
+   Several soft light "blobs" floating behind the player content, all a single violet hue (no
+   multi-color gradient). Each blob's alpha is scaled by the shared --glow-pulse (music
+   amplitude), so the whole field brightens/dims to the beat. Positions are fixed. */
+.media-glow-field {
+  background-image:
+    radial-gradient(circle, rgb(139 92 246 / calc(0.52 * var(--glow-pulse))), transparent 60%),
+    radial-gradient(circle, rgb(139 92 246 / calc(0.5 * var(--glow-pulse))), transparent 60%),
+    radial-gradient(circle, rgb(139 92 246 / calc(0.46 * var(--glow-pulse))), transparent 62%),
+    radial-gradient(circle, rgb(139 92 246 / calc(0.42 * var(--glow-pulse))), transparent 62%);
+  background-repeat: no-repeat;
+  background-size:
+    55% 130%,
+    48% 130%,
+    52% 130%,
+    46% 130%;
+  background-position:
+    5% 50%,
+    95% 25%,
+    62% 85%,
+    30% 15%;
+  filter: blur(7px);
+  mix-blend-mode: screen;
+}
+@media (prefers-reduced-motion: reduce) {
+  .media-glow-field {
+    --glow-pulse: 0.5;
+  }
+}
+
+@keyframes equalizer {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 3s infinite ease-in-out;
+}
+
+/* Terminal-style caret: a crisp on/off blink (not a soft fade) for the chat
+   bubble's cursor while it waits for / streams the reply. */
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 0.7;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-caret-blink {
+  animation: caret-blink 1s steps(1, start) infinite;
+}
+
+.equ-bar {
+  animation: equalizer 0.8s infinite ease-in-out alternate;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.4);
+}

@@ -1,0 +1,26 @@
+services:
+  claudio:
+    build:
+      context: .
+      # China mirrors are the defaults. To build from upstream sources, uncomment:
+      # args:
+      #   NODE_IMAGE: node:24-bookworm-slim
+      #   APT_MIRROR: deb.debian.org
+      #   NPM_REGISTRY: https://registry.npmjs.org
+    image: open-claudio:latest
+    container_name: claudio
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    # API keys & config (GEMINI_API_KEY, LLM_*, TTS keys, …). Copy
+    # .env.example to .env and fill it in.
+    env_file:
+      - .env
+    environment:
+      # Persisted data dir inside the container (matches the named volume below).
+      CLAUDIO_DIR: /data
+    volumes:
+      - claudio-data:/data
+
+volumes:
+  claudio-data:

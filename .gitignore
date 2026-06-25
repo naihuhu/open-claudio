@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+release/
+coverage/
+
+# Runtime data (personal — API keys, login session, history, taste profile)
+.claudio/
+
+# Secrets / env
+.env*
+!.env.example
+
+# Editor / IDE
+.vscode/
+.idea/
+.claude/
+
+# OS / misc
+.DS_Store
+*.log
+*.local
