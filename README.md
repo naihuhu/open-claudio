@@ -27,19 +27,28 @@ Claudio 把「懂音乐的乐迷」和「能动手的私人选曲师」合进同
 ```bash
 git clone https://github.com/naihuhu/open-claudio
 cd open-claudio
-npm install
-
 cp .env.example .env      # 按下方「配置」说明填写
-npm run dev               # 启动开发服务
 ```
 
-启动后访问 http://localhost:3000
+使用 Node 启动：
 
-登录支持 Cookie 与扫码两种方式，登录后才能取到个人 FM、喜欢列表与品味数据。
+```bash
+npm install
+npm run build
+npm run start
+```
+
+或 Docker 启动：
+
+```bash
+docker compose up --build
+```
+
+启动后访问： http://localhost:3000 
 
 ## 配置
 
-配置优先级为 **`config.json` > `.env` > 内置默认值**。`config.json` 是权威来源——在那里设过的值永远胜出；`.env` 只填补 `config.json` 留空的项，并在首次运行时种出一份 `config.json`。界面偏好（主题）、串词开关、默认 FM 开关等都存在 `config.json` 里，也可在设置界面直接改。
+配置优先级为 **`config.json` > `.env` > 内置默认值**。`config.json` 是权威来源——在那里设过的值永远胜出；`.env` 只填补 `config.json` 留空的项，并在首次运行时种出一份 `config.json`。界面偏好（主题）、串词开关、默认 FM 开关等都存在 `config.json` 里，也可点击左上角的 Claudio logo 打开设置界面更改。
 
 关键环境变量（完整说明见 [.env.example](.env.example)）：
 
@@ -57,7 +66,7 @@ npm run dev               # 启动开发服务
 
 ## 架构
 
-Claudio 是一个本地优先的应用：一个 Express 服务进程对外提供 API 并托管前端，所有音乐数据、品味档案、对话历史都落在本机的 `~/.claudio` 目录里。
+Claudio 是一个本地优先的应用：一个 Express 服务进程对外提供 API 并托管前端，所有音乐数据、品味档案、对话历史都落在本机的 `CLAUDIO_DIR` 目录里。
 
 - **模块 A · 品味档案** —— 从网易云抓取听歌记录、喜欢列表与自建歌单，去重聚合到「艺人 + 权重」，原子写入 `TASTE.md`。模块 B 只读这份档案。
 - **模块 B · 音乐 Agent** —— 基于 LangGraph 的 `createAgent` 构建的单层 ReAct Agent，音乐工具（搜索、建单、查询）和播放器工具（队列、播放控制）平铺在同一层，带副作用的工具把指令搭车在事件流里交给客户端执行。这里刻意用裸 LangGraph 而非 deepagents，以避免后者「先规划再执行」的内置诱导让较弱的模型反复搜索却不提交。
@@ -66,28 +75,11 @@ Claudio 是一个本地优先的应用：一个 Express 服务进程对外提供
 ## 技术栈
 
 - **后端**：Node.js + TypeScript + Express
-- **AI**：LangChain / LangGraph，对接任意 OpenAI 兼容的 LLM
+- **Agent**：LangChain / LangGraph，对接任意 OpenAI 兼容的 LLM
+- **前端**：React 19 + Vite + Tailwind CSS
 - **音乐**：网易云音乐 API（`@neteasecloudmusicapienhanced/api`，进程内调用，无 HTTP 转发）
 - **语音**：豆包语音合成 / Fish Audio 双 TTS（两者都配则 Fish 优先）
-- **前端**：React 19 + Vite + Tailwind CSS
 - **持久化**：本地文件 + SQLite（对话 checkpoint）
-
-## 开发
-
-```bash
-npm run dev            # 开发服务（tsx 直跑 server.ts）
-npm run build          # 构建前端 + 打包服务到 dist/
-npm run start          # 跑构建产物
-npm run typecheck      # tsc 类型检查
-npm run lint           # ESLint
-npm run format         # Prettier
-```
-
-### Docker
-
-```bash
-docker compose up --build
-```
 
 ## 关于本项目
 
