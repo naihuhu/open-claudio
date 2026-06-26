@@ -71,13 +71,13 @@ npm run build
 npm run start
 ```
 
-**使用 Docker 启动**
+**或使用 Docker 启动**
 
 ```bash
 docker compose up -d --build
 ```
 
-启动后访问 http://localhost:3000 。
+启动后访问：http://localhost:3000 
 
 ## 配置
 
