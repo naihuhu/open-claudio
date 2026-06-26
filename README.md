@@ -6,12 +6,13 @@
 
 **会聊音乐、也能动手放歌的私人电台 Agent**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-8B5CF6?style=for-the-badge)](LICENSE)
-![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A520-8B5CF6?style=for-the-badge&logo=nodedotjs&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-A78BFA?style=for-the-badge&logo=typescript&logoColor=white)
-![React](https://img.shields.io/badge/React-19-22D3EE?style=for-the-badge&logo=react&logoColor=white)
-![LangGraph](https://img.shields.io/badge/LangGraph-8B5CF6?style=for-the-badge&logo=langchain&logoColor=white)
-[![GitHub stars](https://img.shields.io/github/stars/naihuhu/open-claudio?style=for-the-badge&logo=github&color=8B5CF6)](https://github.com/naihuhu/open-claudio)
+[![License: MIT](https://img.shields.io/badge/License-MIT-FF6B6B?style=for-the-badge&logo=open_source_initiative&logoColor=fff)](LICENSE)
+![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A520-FFD93D?style=for-the-badge&logo=nodedotjs&logoColor=000)
+![TypeScript](https://img.shields.io/badge/TypeScript-6C9CFF?style=for-the-badge&logo=typescript&logoColor=fff)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=000)
+![LangGraph](https://img.shields.io/badge/LangGraph-39FF85?style=for-the-badge&logo=langchain&logoColor=000)
+[![GitHub stars](https://img.shields.io/github/stars/naihuhu/open-claudio?style=for-the-badge&logo=github&color=white&labelColor=333)](https://github.com/naihuhu/open-claudio)
+
 
 [功能](#功能)&nbsp;·&nbsp;[快速开始](#快速开始)&nbsp;·&nbsp;[配置](#配置)&nbsp;·&nbsp;[架构](#架构)&nbsp;·&nbsp;[技术栈](#技术栈)
 
