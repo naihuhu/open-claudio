@@ -1,4 +1,5 @@
-# syntax=docker/dockerfile:1
+# # syntax=docker/dockerfile:1
+# syntax=docker.m.daocloud.io/docker/dockerfile:1
 
 # ---------- China mirrors (overridable) ----------
 # Defaults speed up builds for developers in China. International users can

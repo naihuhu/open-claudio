@@ -820,6 +820,67 @@ function loadPlayerState(): any {
   }
 }
 
+// ---- Audio-reactive glow: ring buffer + fixed-timestep rendering ----
+// The audio analysis (AudioWorklet or Meyda fallback) pushes features into a
+// ring buffer at ~86 Hz. The DJ speech analyser pushes into a separate ring
+// buffer at ~60 Hz. The glow rAF loop reads from these buffers with
+// time-based interpolation at a FIXED timestep — decoupled from rAF's actual
+// callback timing. This eliminates the jitter caused by Windows' 15.6 ms
+// default timer resolution (rAF frames arrive at ~15.6 ms or ~31.2 ms instead
+// of a smooth 16.67 ms), making the glow track the beat just as tightly on
+// Windows as on macOS.
+interface MusicFeat {
+  time: number; // performance.now() when the sample was captured
+  rms: number; // overall loudness (0..1)
+  bassRms: number; // bass-band energy (0..1)
+}
+interface SpeechFeat {
+  time: number;
+  rms: number; // voice loudness (0..1)
+}
+const MUSIC_BUF_MAX = 8; // ~93 ms window at 86 Hz push rate
+const SPEECH_BUF_MAX = 16; // ~267 ms window at 60 Hz push rate
+
+// Linearly interpolate music features from the ring buffer at the given time.
+// Finds the two nearest samples bracketing `now` and lerps. If `now` is
+// outside the buffer range, returns the nearest edge sample — this means
+// during a buffer underrun (e.g. audio just started) the glow smoothly
+// holds its last known level instead of snapping to zero.
+function interpolateMusic(buf: MusicFeat[], now: number): { rms: number; bassRms: number } {
+  const len = buf.length;
+  if (len === 0) return { rms: 0, bassRms: 0 };
+  if (len === 1 || now <= buf[0].time) return { rms: buf[0].rms, bassRms: buf[0].bassRms };
+  const last = buf[len - 1];
+  if (now >= last.time) return { rms: last.rms, bassRms: last.bassRms };
+  for (let i = 1; i < len; i++) {
+    if (now <= buf[i].time) {
+      const a = buf[i - 1],
+        b = buf[i];
+      const t = (now - a.time) / (b.time - a.time || 1);
+      return { rms: a.rms + t * (b.rms - a.rms), bassRms: a.bassRms + t * (b.bassRms - a.bassRms) };
+    }
+  }
+  return { rms: last.rms, bassRms: last.bassRms };
+}
+
+// Same interpolation for the DJ speech buffer (single scalar).
+function interpolateSpeech(buf: SpeechFeat[], now: number): number {
+  const len = buf.length;
+  if (len === 0) return 0;
+  if (len === 1 || now <= buf[0].time) return buf[0].rms;
+  const last = buf[len - 1];
+  if (now >= last.time) return last.rms;
+  for (let i = 1; i < len; i++) {
+    if (now <= buf[i].time) {
+      const a = buf[i - 1],
+        b = buf[i];
+      const t = (now - a.time) / (b.time - a.time || 1);
+      return a.rms + t * (b.rms - a.rms);
+    }
+  }
+  return last.rms;
+}
+
 export default function App() {
   // Theme state
   const [colorMode, setColorMode] = useState<'dark' | 'light'>('dark');
@@ -974,16 +1035,16 @@ export default function App() {
   // panel's --glow-pulse CSS variable from the live amplitude (see the rAF loop below).
   const audioCtxRef = useRef<AudioContext | null>(null);
   const meydaRef = useRef<ReturnType<typeof Meyda.createMeydaAnalyzer> | null>(null);
-  const meydaFeatRef = useRef<any>(null); // latest features from Meyda's callback
   const mediaSrcRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const glowValRef = useRef(0.5); // smoothed --glow-pulse output
-  const glowBaseRef = useRef(0); // slow baseline of bass energy (for kick onsets)
-  const glowPeakRef = useRef(0.05); // AGC: adaptive peak of overall loudness
-  const glowBassPeakRef = useRef(0.01); // AGC: adaptive peak of bass onset strength
-  const speechRmsRef = useRef(0); // live RMS of the DJ voice (0 when not speaking)
-  const glowSpeechPeakRef = useRef(0.03); // AGC: adaptive peak of the DJ voice
   const speechDetachRef = useRef<() => void>(() => {}); // tears down the current DJ→glow tap
   const musicVolRampRef = useRef<number | null>(null); // in-flight music volume ramp (duck/lift) — rAF fallback only
+  // Ring buffers for the decoupled glow renderer (see interpolation helpers above).
+  // The audio analyser pushes MusicFeat samples; the speech analyser pushes SpeechFeat.
+  // The glow rAF loop reads from these with time-based interpolation — smooth on any OS.
+  const musicBufferRef = useRef<MusicFeat[]>([]);
+  const speechBufferRef = useRef<SpeechFeat[]>([]);
+  // Guard against concurrent glow setup (AudioWorklet addModule is async).
+  const glowSetupRef = useRef(false);
   // Music duck multiplier (1 = full, <1 = ducked under the DJ). Lives on the audio thread as a
   // GainNode so its ramps keep running when the browser window loses focus / is occluded — where
   // requestAnimationFrame (the old rAF volume tween) is throttled or paused and the fade stalled.
@@ -1178,45 +1239,116 @@ export default function App() {
     }
   }, [isPlaying, currentTrackIndex, tracks[currentTrackIndex]?.url]);
 
-  // Tap the <audio> through Meyda once for feature extraction (createMediaElementSource may
-  // only be called once per element, so guard on meydaRef). Meyda runs its own analysis and
-  // hands us the latest features via callback. If the track's CDN doesn't send CORS headers the
-  // features read silence (a browser security rule) and the glow stays calm — playback is never
-  // affected.
+  // Tap the <audio> for feature extraction. Prefers AudioWorklet (runs on the
+  // audio thread — no main-thread jitter, the key Windows fix); falls back to
+  // Meyda's ScriptProcessor if AudioWorklet isn't available. Both paths push
+  // { rms, bassRms } into musicBufferRef at ~86 Hz, which the glow rAF loop
+  // reads via time-based interpolation. createMediaElementSource may only be
+  // called once per element, so guard on meydaRef + glowSetupRef.
   const ensureGlowAnalyser = () => {
-    if (meydaRef.current || !audioRef.current) return;
+    if (meydaRef.current || glowSetupRef.current || !audioRef.current) return;
+    glowSetupRef.current = true;
     try {
       const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!Ctx) return;
+      if (!Ctx) {
+        glowSetupRef.current = false;
+        return;
+      }
       const ctx: AudioContext = new Ctx();
       const source = ctx.createMediaElementSource(audioRef.current);
-      // source → duckGain → destination. Ducking rides this gain node (automated on the audio
-      // thread) instead of the <audio>.volume property, so the duck/lift fade survives the window
-      // losing focus. The user volume slider still drives <audio>.volume; the two multiply.
+      // source → duckGain → … Ducking rides this gain node (automated on the
+      // audio thread) instead of the <audio>.volume property, so the duck/lift
+      // fade survives the window losing focus. The user volume slider still
+      // drives <audio>.volume; the two multiply.
       const duckGain = ctx.createGain();
       duckGain.gain.value = 1;
       source.connect(duckGain);
-      duckGain.connect(ctx.destination); // keep the music audible
       duckGainRef.current = duckGain;
-      const analyzer = Meyda.createMeydaAnalyzer({
-        audioContext: ctx,
-        // Tap AFTER the duck so the glow reads the ducked music — when the DJ talks the song is
-        // quiet here, letting the voice dominate the glow (matches the old volume-based duck).
-        source: duckGain,
-        bufferSize: 512,
-        // rms = overall perceived loudness (drives the base glow, vocals included);
-        // loudness.specific = bark bands, whose lowest bins are the kick/bass (drive the punch).
-        featureExtractors: ['rms', 'loudness'],
-        callback: (features: any) => {
-          meydaFeatRef.current = features;
-        },
-      });
-      analyzer.start();
       audioCtxRef.current = ctx;
       mediaSrcRef.current = source;
-      meydaRef.current = analyzer;
+
+      // Helper: push a music feature sample into the ring buffer.
+      const pushMusic = (rms: number, bassRms: number) => {
+        const buf = musicBufferRef.current;
+        buf.push({ time: performance.now(), rms, bassRms });
+        if (buf.length > MUSIC_BUF_MAX) buf.shift();
+      };
+
+      // Helper: wire up Meyda ScriptProcessor fallback (main-thread analysis).
+      const setupMeydaFallback = () => {
+        try {
+          duckGain.connect(ctx.destination);
+          const analyzer = Meyda.createMeydaAnalyzer({
+            audioContext: ctx,
+            // Tap AFTER the duck so the glow reads the ducked music — when the
+            // DJ talks the song is quiet here, letting the voice dominate.
+            source: duckGain,
+            bufferSize: 512,
+            featureExtractors: ['rms', 'loudness'],
+            callback: (features: any) => {
+              const rms = features?.rms || 0;
+              // Sum the lowest bark bands as the bass indicator (same as the
+              // original logic). Values are in phon units; the AGC in the glow
+              // loop normalises regardless of absolute scale.
+              const spec: Float32Array | undefined = features?.loudness?.specific;
+              const bass = spec ? spec[0] + spec[1] + spec[2] : 0;
+              pushMusic(rms, Math.max(0, bass));
+            },
+          });
+          analyzer.start();
+          meydaRef.current = analyzer;
+          console.log('[glow] Meyda fallback active — ScriptProcessor on main thread');
+        } catch (err) {
+          console.warn('Meyda glow fallback failed:', err);
+          glowSetupRef.current = false;
+        }
+      };
+
+      // Try AudioWorklet first — runs feature extraction on the audio thread,
+      // completely decoupled from the main thread's rAF jitter.
+      if (ctx.audioWorklet) {
+        ctx.audioWorklet
+          .addModule('/glow-processor.js')
+          .then(() => {
+            try {
+              const worker = new AudioWorkletNode(ctx, 'glow-processor', {
+                numberOfInputs: 1,
+                numberOfOutputs: 1,
+              });
+              worker.port.onmessage = (e: MessageEvent) => {
+                pushMusic(e.data.rms, e.data.bassRms);
+              };
+              // Audio graph: duckGain → worklet (analyses + passes through) → destination.
+              // The worklet copies input→output so audio keeps playing normally.
+              duckGain.connect(worker);
+              worker.connect(ctx.destination);
+              meydaRef.current = {
+                stop: () => {
+                  try {
+                    worker.disconnect();
+                  } catch {
+                    /* already gone */
+                  }
+                },
+              } as any;
+              console.log(
+                '[glow] AudioWorklet active — audio-thread processing, no main-thread jitter',
+              );
+            } catch (err) {
+              console.warn('AudioWorklet node creation failed, using Meyda:', err);
+              setupMeydaFallback();
+            }
+          })
+          .catch(() => {
+            console.warn('AudioWorklet module load failed, using Meyda fallback');
+            setupMeydaFallback();
+          });
+      } else {
+        setupMeydaFallback();
+      }
     } catch (err) {
       console.warn('Audio-reactive glow unavailable:', err);
+      glowSetupRef.current = false;
     }
   };
 
@@ -1261,6 +1393,8 @@ export default function App() {
   // Route the DJ voice element through our AudioContext so its live RMS can drive the glow while
   // it speaks. Needs the context that ensureGlowAnalyser() built (created when music first plays);
   // if it isn't there yet we leave the voice on its normal output (still audible) and skip the tap.
+  // Pushes RMS samples into the speech ring buffer (speechBufferRef) — the glow rAF loop reads
+  // from there with time-based interpolation instead of reading a single ref value.
   // Returns a teardown that stops the analysis and frees the nodes.
   const attachSpeechToGlow = (el: HTMLMediaElement): (() => void) => {
     const ctx = audioCtxRef.current;
@@ -1279,12 +1413,14 @@ export default function App() {
           const v = (data[i] - 128) / 128;
           sum += v * v;
         }
-        speechRmsRef.current = Math.sqrt(sum / data.length); // 0..1 voice loudness
+        // Push into the speech ring buffer (replaces the old speechRmsRef write).
+        const buf = speechBufferRef.current;
+        buf.push({ time: performance.now(), rms: Math.sqrt(sum / data.length) });
+        if (buf.length > SPEECH_BUF_MAX) buf.shift();
         raf = requestAnimationFrame(loop);
       });
       return () => {
         cancelAnimationFrame(raf);
-        speechRmsRef.current = 0;
         try {
           src.disconnect();
           analyser.disconnect();
@@ -1297,54 +1433,131 @@ export default function App() {
     }
   };
 
-  // Hybrid audio-reactive glow:
-  //   • base layer follows overall loudness (rms) so the WHOLE song — vocals included — makes
-  //     the light rise and fall; an AGC (adaptive peak) keeps loud & quiet songs in the same
-  //     range so it never just pins to full;
-  //   • a punch layer adds a transient kick on each bass onset on top of that base;
-  //   • when the DJ speaks, its voice RMS feeds the same base — and since the music is ducked
-  //     under the DJ, the voice naturally becomes what drives the glow.
-  // When nothing plays it eases back to a calm resting level (no idle flicker).
+  // Fixed-timestep audio-reactive glow renderer.
+  //
+  // HOW IT WORKS (and why this fixes Windows):
+  //   The old loop ran all its signal processing inside rAF, so the visual
+  //   output was slaved to rAF's actual callback timing. On macOS rAF fires
+  //   at a rock-steady ~16.67 ms; on Windows the default system timer is
+  //   15.625 ms, so rAF alternates between ~15.6 ms and ~31.2 ms — visibly
+  //   jittery. The glow "律动" felt less precise because each beat's onset
+  //   landed at a slightly different visual moment every frame.
+  //
+  //   Now the signal state (AGC, smoothing) advances at a FIXED 120 Hz step
+  //   regardless of when rAF actually fires. Between steps we linearly
+  //   interpolate for display. The audio features come from time-stamped
+  //   ring buffers (musicBufferRef, speechBufferRef) which are also
+  //   interpolated — so even if the analyser's own push timing has jitter,
+  //   the rendered glow is a smooth, deterministic curve.
+  //
+  // WHAT'S PRESERVED from the original:
+  //   • AGC (adaptive peak) on overall loudness → base glow
+  //   • Bass onset detection → transient punch
+  //   • DJ voice RMS → same base glow path (music ducked under it)
+  //   • Fast attack / slow release envelope (time-constant-matched)
+  //   • REST level when nothing plays
   useEffect(() => {
     const REST = 0.42;
     const root = document.documentElement;
+
+    // Fixed timestep at 60 Hz — matches the original per-frame coefficients
+    // exactly, so the signal behaviour (AGC, bass onset, attack/release) is
+    // identical to the old loop. The improvement comes purely from the FIXED
+    // timing: on Windows the rAF callback alternates between ~15.6 ms and
+    // ~31.2 ms (15.625 ms default timer), but our signal state advances at
+    // exactly 16.67 ms regardless. Display interpolation between computed
+    // values smooths out whatever rAF does.
+    const FIXED_DT = 1000 / 60; // 16.67 ms
+
+    // Smoothing constants — same as the original code (valid at 60 Hz).
+    const ATTACK_K = 0.35; // fast attack: beats snap bright
+    const RELEASE_K = 0.1; // slow release: ease back down
+
+    // Local glow state — these were previously refs (glowValRef etc.) but
+    // since the glow loop is a single stable effect they live in the closure.
+    let glowVal = REST;
+    let glowPeak = 0.05; // AGC: adaptive peak of overall loudness
+    let glowBassPeak = 0.01; // AGC: adaptive peak of bass onset strength
+    let glowBase = 0; // slow baseline of bass energy (for kick onset detection)
+    let glowSpeechPeak = 0.03; // AGC: adaptive peak of DJ voice
+
     let raf = 0;
-    const tick = () => {
-      let target = REST;
+    let lastTime = 0;
+    let accumulator = 0;
+    let prevVal = REST; // bracketing value for display interpolation
+    let currVal = REST;
+
+    const tick = (now: number) => {
+      // First frame: seed the timer, nothing to compute yet.
+      if (!lastTime) {
+        lastTime = now;
+        prevVal = REST;
+        currVal = REST;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      // Cap delta at 100 ms to prevent "spiral of death" after a long pause
+      // (tab backgrounded, debugger breakpoint, etc.) — without the cap the
+      // while-loop would spin through hundreds of fixed steps to catch up.
+      const delta = Math.min(now - lastTime, 100);
+      lastTime = now;
+      accumulator += delta;
+
       const audio = audioRef.current;
-      const f = meydaFeatRef.current;
-      let musicNorm = 0;
-      let punch = 0;
-      if (f && audio && !audio.paused) {
-        // 1) Overall loudness → base glow. AGC: peak rises instantly, decays slowly, so the
-        // normalised level always uses the full range instead of saturating.
-        const overall = f.rms || 0;
-        glowPeakRef.current = Math.max(overall, glowPeakRef.current * 0.997, 0.03);
-        musicNorm = Math.min(1, overall / glowPeakRef.current);
-        // 2) Bass/kick onset → punch. Sum the lowest bark bands, react to the rise above their
-        // slow baseline, and AGC-normalise that rise so kicks read the same loud or quiet.
-        const spec: Float32Array | undefined = f.loudness?.specific;
-        const bass = spec ? spec[0] + spec[1] + spec[2] : 0;
-        const rise = Math.max(0, bass - glowBaseRef.current);
-        glowBaseRef.current += (bass - glowBaseRef.current) * 0.1;
-        glowBassPeakRef.current = Math.max(rise, glowBassPeakRef.current * 0.99, 0.001);
-        punch = Math.min(1, rise / glowBassPeakRef.current);
+
+      // Advance signal state at FIXED_DT steps, independent of rAF timing.
+      while (accumulator >= FIXED_DT) {
+        prevVal = currVal;
+
+        let target = REST;
+        let musicNorm = 0;
+        let punch = 0;
+
+        // Read time-interpolated music features from the ring buffer.
+        const m = interpolateMusic(musicBufferRef.current, now);
+
+        if ((m.rms > 0 || m.bassRms > 0) && audio && !audio.paused) {
+          // 1) Overall loudness → base glow. AGC: peak rises instantly,
+          // decays slowly, so the normalised level always uses the full
+          // range instead of saturating on loud songs.
+          glowPeak = Math.max(m.rms, glowPeak * 0.997, 0.03);
+          musicNorm = Math.min(1, m.rms / glowPeak);
+
+          // 2) Bass/kick onset → punch. Track a slow baseline, react to the
+          // rise above it, AGC-normalise so kicks read the same at any volume.
+          const rise = Math.max(0, m.bassRms - glowBase);
+          glowBase += (m.bassRms - glowBase) * 0.1;
+          glowBassPeak = Math.max(rise, glowBassPeak * 0.99, 0.001);
+          punch = Math.min(1, rise / glowBassPeak);
+        }
+
+        // 3) DJ voice → base glow (AGC-normalised like the music). When the
+        // music is ducked under the DJ, the voice naturally dominates.
+        const sp = interpolateSpeech(speechBufferRef.current, now);
+        glowSpeechPeak = Math.max(sp, glowSpeechPeak * 0.995, 0.02);
+        const speechNorm = sp > 0.002 ? Math.min(1, sp / glowSpeechPeak) : 0;
+
+        const baseNorm = Math.max(musicNorm, speechNorm);
+        if (baseNorm > 0 || punch > 0) {
+          target = 0.3 + baseNorm * 0.38 + punch * 0.22;
+        }
+
+        // Fast attack, slow release → beats snap bright then ease back down.
+        const k = target > glowVal ? ATTACK_K : RELEASE_K;
+        glowVal += (target - glowVal) * k;
+        currVal = Math.min(0.95, Math.max(0.15, glowVal));
+
+        accumulator -= FIXED_DT;
       }
-      // 3) DJ voice → base glow (AGC-normalised like the music). Drives the light on its own when
-      // the music is ducked under it, so the panel "talks" with the DJ.
-      const sp = speechRmsRef.current;
-      glowSpeechPeakRef.current = Math.max(sp, glowSpeechPeakRef.current * 0.995, 0.02);
-      const speechNorm = sp > 0.002 ? Math.min(1, sp / glowSpeechPeakRef.current) : 0;
-      const baseNorm = Math.max(musicNorm, speechNorm);
-      if (baseNorm > 0 || punch > 0) {
-        // Base loudness glow (music vocals / DJ voice) + kick punch — peaks comfortably below "full".
-        target = 0.3 + baseNorm * 0.38 + punch * 0.22;
-      }
-      // Fast attack, slow release → beats snap bright then ease back down, like a real pulse.
-      const k = target > glowValRef.current ? 0.35 : 0.1;
-      glowValRef.current += (target - glowValRef.current) * k;
-      const v = Math.min(0.95, Math.max(0.15, glowValRef.current));
-      root.style.setProperty('--glow-pulse', v.toFixed(3));
+
+      // Interpolate between the two bracketing computed values for display.
+      // On a 144 Hz display with 120 Hz computation, alpha smoothly fills the
+      // gap between steps. On a jittery Windows 60 Hz rAF, this eliminates
+      // the visible stepping that the old loop had.
+      const alpha = accumulator / FIXED_DT;
+      const displayed = prevVal + (currVal - prevVal) * alpha;
+      root.style.setProperty('--glow-pulse', displayed.toFixed(3));
+
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);

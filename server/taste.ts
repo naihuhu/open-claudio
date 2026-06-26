@@ -214,11 +214,11 @@ export async function gatherMusicData(
   // }));
   const listenTop100: { name?: string; artist: string; playCount?: number }[] = [];
 
-  // ② 艺人 + 歌曲数：只取红心前 520 首，去重后按主艺人归堆，一首一票，票数即权重。
+  // ② 拉全部红心歌曲，去重后按主艺人归堆（一首歌=一票），仅保留歌曲数最多的前 520 位歌手。
   const likedIds = await getLikedIds(userId, cookie);
   await sleep(TASTE_RATE_MS);
-  const library = await getSongDetails(likedIds.slice(0, 520), cookie);
-  const artistCounts = aggregateArtists({ rows: library, weight: () => 1 });
+  const library = await getSongDetails(likedIds, cookie);
+  const artistCounts = aggregateArtists({ rows: library, weight: () => 1 }).slice(0, 520);
 
   // Cache the gathered songs to liked_songs.jsonl (JSONL per storage convention; debug/reuse).
   try {
@@ -290,10 +290,10 @@ export async function generateTasteProfile(
 
     p.onProgress?.('analyzing');
 
-    // 只喂一块：艺人权重表（红心前 520 首去重）。听歌排行暂时注释掉。
-    const artistText = formatArtistList(data.artistCounts);
+    // 只喂一块：艺人权重表（全部红心去重后 top 520 歌手）。听歌排行暂时注释掉。
+    const artistText = formatArtistList(data.artistCounts, 520);
     // const listenText = data.listenTop100.map((s) => `${s.name} (${s.playCount})`).join("\n") || "(无听歌记录)";
-    const payload = `[艺人权重表 · 红心前 520 首去重后（括号内=歌曲数，越大越能代表偏好；信号在艺人不在单曲）]\n${artistText}`;
+    const payload = `[艺人权重表 · 全部红心歌曲去重后，按歌曲数降序保留前 520 位歌手（括号内=歌曲数，越大越能代表偏好；信号在艺人不在单曲）]\n${artistText}`;
     // + `\n\n[听歌排行 · 最常听的歌前 100（括号内=播放次数，反映实际在反复听什么）]\n${listenText}`;
 
     const template = loadPromptTemplate();

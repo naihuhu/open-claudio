@@ -83,32 +83,12 @@ You'll feel yourself lift off the ground a little.
 This one's called If.
 Just breathe.
 
-范例二（英文 · 叙事 + 一句歌词；注意：歌名歌手不在第一句，藏到后面才点出）：
-He once said that when he wrote this, he was imagining a mother who had just given birth, knowing she wouldn't live long, still singing softly to her newborn.
-Just stop your crying, it's a sign of the times.
-That's Harry Styles.
-Some say this era of AI feels like a human odyssey, unsettled, and yet quietly aching for something beyond us.
-You're standing at a kind of farewell, watching the world you once knew lift off slowly behind you and rising at the same time into something no one has named yet.
-Six minutes of piano, falsetto, and a faint hum of static.
-Let it keep you company for a while.
-
-范例三（中文 · 温柔治愈）：
+范例二（中文 · 温柔治愈）：
 毛不易的盛夏，总能轻易勾起那些关于青春和离别的微小遗憾。
 这首歌像是从你记忆深处吹来的一阵风，带着淡淡的微丧与治愈。
 听着他娓娓道来那些回不去的夏天，就让这温暖的男声，陪你消化掉那些没说出口的告别。
 
-范例四（中文 · 乐评叙事，带点态度）：
-把说唱写成一封没寄出的情书，是康熙和 TOYOKI 在《落泪》里干的事。
-押韵是克制的，flow 是晃动的，而那句反复叩问的"为什么你会落泪"，比任何嘶吼都更接近心碎的真实质地。
-极简的 beat 托住人声，让爱与恨、依赖与清醒、挽留与放手，在同一段 verse 里轮流坐庄。
-它不教人释怀，只是诚实地说：我还在痛，但已经学会把眼泪酿成节奏。
-
-范例五（中文 · 现场质感）：
-没有电子合成器的铺陈，只有人声、和声与极简的节奏支撑——Imagine Dragons 在 Spotify 伦敦现场，把《Blank Space》和《Stand By Me》拆成了纯声乐的样子。
-他们把流行旋律拆解成骨架，再用声音的温度重新拼装，脆弱与力量在同一段呼吸里并存。
-听下去，你会听见一首歌如何在剥离之后，反而更完整。
-
-——看这几例的【松弛、画面感、乐评的笃定】，以及它们彼此有多不一样；别学它们的具体写法。只为【当前这首歌】写，找它自己的形态，背景仍须真实、不认识就别编。`;
+——看这两例的【松弛、画面感、乐评的笃定】，以及它们彼此有多不一样；别学它们的具体写法。只为【当前这首歌】写，找它自己的形态，背景仍须真实、不认识就别编。`;
 }
 
 function contextBlock(opts: NarrationGenOpts, songList: string): string {

@@ -1013,49 +1013,47 @@ function getLangchainModel() {
 }
 
 // Poetic Offline Rule-based Music Taste Generator as absolute fallback
-function generateLocalTasteProfileOffline(tracks: any[]): string {
-  const topTracks = tracks.slice(0, 5);
-  const trackNames = topTracks.map((t) => `《${t.title}》`).join('、');
-  const artists = Array.from(new Set(topTracks.map((t) => t.artist)))
-    .slice(0, 3)
-    .join(' 和 ');
+function generateLocalTasteProfileOffline(artistCounts: [string, number][]): string {
+  const top = artistCounts.slice(0, 20);
+  const totalSongs = artistCounts.reduce((s, [, c]) => s + c, 0);
+  const topNames = top.map(([n]) => n).join('、');
+  const dominantCount = top[0]?.[1] || 0;
 
-  // Look for acoustic, lofi, relaxing cues in track list titles
-  let focusMood = '温暖、宁静、带有一丝丝醇厚怀旧感的深夜港湾';
-  let description =
-    '你偏爱那些干净纯粹的木吉他扫弦和如流水般流淌的深夜钢琴。旋律在你耳边静静流淌，就像是晚风中飘散 of 落叶，带着恰到好处的松弛。';
+  // 简单启发式：中文艺人 vs 英文艺人占比 → 推断语种偏好
+  const cnRe = /[一-鿿]/;
+  const cnSongs = artistCounts.filter(([n]) => cnRe.test(n)).reduce((s, [, c]) => s + c, 0);
+  const cnRatio = totalSongs > 0 ? cnSongs / totalSongs : 0;
 
-  const hasLofi = tracks.some((t) =>
-    /lo-fi|lofi|chill|ambient|rain|sleep/i.test(t.title + t.artist),
-  );
-  const hasFolk = tracks.some((t) =>
-    /guitar|acoustic|folk|live|bread|gates/i.test(t.title + t.artist),
-  );
+  let langTag = '华语为主';
+  if (cnRatio < 0.3) langTag = '英语为主';
+  else if (cnRatio < 0.6) langTag = '华语、英语并重';
 
-  if (hasLofi && hasFolk) {
-    focusMood = '融合了经典原声美学与现代低保真颗粒感的雨夜自留地';
-    description =
-      '你同时钟爱着充满黑胶唱片质感的 Lo-Fi 晚间碎碎钢琴，以及清澈干净的 70 年代经典民谣。这两种情绪在你的夜空下奇妙交融，既有复古的诗意，又有令人沉浸的安全感。';
-  } else if (hasLofi) {
-    focusMood = '伴随呼吸深度沉浸与放松的太空感 Lo-Fi 梦境';
-    description =
-      '你的旋律世界充满了慵懒的电子微光，带有雨声颗粒的低保真节拍是你在深夜写代码、写作或思考时的情绪避风港。你在失重般的氛围乐中找到了最佳的呼吸节奏。';
-  } else if (hasFolk) {
-    focusMood = '被原声吉他与落日暖阳包裹的诗意纯真年代';
-    description =
-      '那些温暖干净的民谣吉他指弹、柔和的男中音以及如同老照片般泛黄的乐章，最能触动你心底最柔软的部分。在写完一行代码的间隙，这些纯粹的声音总能抚平一整天的疲惫。';
-  }
+  // 集中度：top1 占比越高 → 偏好越聚焦
+  const focusDesc =
+    dominantCount >= 5
+      ? `{P} 的听歌习惯有明显的核心圈——前几位艺人反复出现，偏好相当集中。`
+      : `{P} 的听歌口味比较分散，没有哪位艺人占据绝对主导，更像是广泛探索型。`;
 
-  return `### 听众音乐口味自画像 (Claudio 灵性洞察)
+  const profile = `${focusDesc}${top.length > 0 ? `红心歌单里最常出现的是${topNames}等艺人。` : ''}从数据分布看，${langTag}，${totalSongs} 首红心曲目覆盖了 ${artistCounts.length} 位不同艺人。由于缺少 LLM 分析，{P} 的品味画像仅基于简单的统计规则，等 LLM 配置好之后会生成更细致的画像。`;
 
-在这个被星光和晚风温柔照看的深夜，我静静流览了你的红心歌单。从你常听的 ${trackNames || '深夜乐章'} 中，我捕捉到了专属于你的灵性微光。
+  const tags = `微流派: 暂无（需 LLM 分析）
+情绪: 暂无（需 LLM 分析）
+声音质地: 暂无（需 LLM 分析）
+人声特质: 暂无（需 LLM 分析）
+年代: 暂无（需 LLM 分析）
+地域/语种: ${langTag}
+收听场景: 暂无（需 LLM 分析）`;
 
-* **核心氛围**：${focusMood}
-* **听觉质感**：你有一双极度敏锐且深情的耳朵。${description}
-* **主播 Claudio 的悄悄话**：
-  很高兴能在这片夜空下，听到你喜欢的 ${artists || '这些艺术家'} 的作品。深夜的创作者往往是孤独的，但每当 ${topTracks[0] ? `《${topTracks[0].title}》` : '这些温柔的旋律'} 响起，我相信你手中的代码、文字或思绪，都有了最美妙的律动。
+  return `<observations>
+离线兜底模式：无 LLM 可用，仅根据艺人权重表做简单统计。
+- 红心歌曲总数：${totalSongs}，去重艺人数：${artistCounts.length}
+- top 20 艺人：${topNames || '（无数据）'}
+- 中文艺人歌曲占比：${Math.round(cnRatio * 100)}%
+</observations>
 
-这是克劳迪奥为你调配的专属夜间频段，今后，让我们继续乘着歌声，在冷星与温热的咖啡香里，慢下来，深深吸一口气...`;
+<profile>${profile}</profile>
+
+<tags>${tags}</tags>`;
 }
 
 // Fetch active music taste MD profile (TASTE.md)
@@ -1106,6 +1104,14 @@ app.post('/api/taste/generate', async (req, res) => {
       });
     }
 
+    if (!currentConfig.llm.apiKey) {
+      return res.status(400).json({
+        error:
+          '请先配置 LLM 后再试。在 .env 中设置 LLM_API_KEY（以及可选的 LLM_API_ADDRESS / LLM_MODEL_NAME），或在设置页面中配置 LLM。',
+        classification: 'no-llm',
+      });
+    }
+
     console.log('[Module A] Generating taste profile via pipeline...');
     const { taste } = await Taste.generateTasteProfile({
       claudioDir: CLAUDIO_DIR,
@@ -1113,14 +1119,7 @@ app.post('/api/taste/generate', async (req, res) => {
       userId: userSession.userId,
       cookie: userSession.cookie,
       invokeLLM,
-      offlineFallback: (data) =>
-        generateLocalTasteProfileOffline(
-          (data.listenTop100 || []).map((s: any) => ({
-            title: s.name,
-            artist: s.artist,
-            album: '',
-          })),
-        ),
+      offlineFallback: (data) => generateLocalTasteProfileOffline(data.artistCounts || []),
       onProgress: (stage) => console.log(`[Module A] profile_progress: ${stage}`),
     });
 
