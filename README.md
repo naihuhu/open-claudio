@@ -101,17 +101,6 @@ docker compose up -d --build
 
 Claudio 是一个本地优先的应用：一个 Express 进程对外提供 API 并托管前端，所有音乐数据、品味档案和对话历史都落在本机的 `CLAUDIO_DIR` 目录下。
 
-```mermaid
-flowchart LR
-    NE["网易云音乐 API"] --> Taste["品味档案 · TASTE.md"]
-    User(["你的对话"]) --> Agent["音乐 Agent · LangGraph"]
-    Taste -. 只读 .-> Agent
-    Agent -->|"播放 / 队列指令"| Client["网页客户端 · 播放器"]
-    Client -->|"当前歌曲"| Narr["/api/narration"]
-    Narr --> TTS["TTS · Fish / 豆包"]
-    TTS -->|"mp3 叠播"| Client
-```
-
 **品味档案**
 
 从网易云抓取听歌记录、喜欢列表和自建歌单，去重后聚合成「艺人 + 权重」，原子写入 `TASTE.md`，对外只读。
