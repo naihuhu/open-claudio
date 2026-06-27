@@ -1,6 +1,6 @@
 <div align="center">
 
-<!-- <img src="assets/banner.png" alt="Open Claudio" /> -->
+<img src="assets/open-claudio.jpg" alt="Open Claudio" />
 
 # Open Claudio
 
